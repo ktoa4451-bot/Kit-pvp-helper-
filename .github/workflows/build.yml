@@ -1,0 +1,63 @@
+name: Build mod
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Если в репозитории лежит только ZIP с проектом - распаковываем его
+      - name: Find project
+        id: proj
+        run: |
+          if [ -f build.gradle ]; then
+            DIR=.
+          else
+            ZIP=$(ls -t *.zip 2>/dev/null | head -n1)
+            if [ -z "$ZIP" ]; then echo "No build.gradle and no ZIP found"; exit 1; fi
+            rm -rf _proj && mkdir _proj && unzip -q "$ZIP" -d _proj
+            DIR=$(dirname "$(find _proj -name build.gradle | head -n1)")
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.2.0'
+
+      - name: Build
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: gradle build --no-daemon
+
+      - name: Collect jar
+        run: |
+          mkdir -p out
+          for f in "${{ steps.proj.outputs.dir }}"/build/libs/*.jar; do
+            case "$f" in
+              *-sources.jar|*-dev.jar) ;;
+              *) cp "$f" out/ ;;
+            esac
+          done
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kitpvp-glass
+          path: out/*.jar
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          files: out/*.jar
